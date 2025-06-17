@@ -146,6 +146,44 @@ def cleanup_cache(cache_ttl):
 
     return len(expired_keys)
 
+def process_request(request, conn, patterns, cache_ttl):
+    """Process a single request and send the appropriate response."""
+    matched = False
+    domain = None
+
+    # Match 'get email@domain'
+    if request != 'get *':
+        email_match = re.match(r'^get\s+([\w.+-]+@[\w.-]+)$', request, re.IGNORECASE)
+        if email_match:
+            email = email_match.group(1).lower()
+            parts = email.split('@')
+            if len(parts) == 2:
+                domain = parts[1]
+                mx_records = get_mx_records(domain, cache_ttl)
+
+                for mx in mx_records:
+                    for pattern, relay in patterns.items():
+                        if pattern in mx:
+                            matched = relay
+                            break
+                    if matched:
+                        break
+
+    if matched:
+        send_response(conn, 200, matched)
+        sys.stdout.write(f"Matched: {domain} → {matched}\n")
+    else:
+        send_response(conn, 500, 'NO RESULT')
+        sys.stdout.write(f"No match: {request}\n")
+
+    sys.stdout.flush()
+    return domain, matched
+
+def send_response(conn, status_code, message):
+    """Send a formatted response to the client with proper encoding."""
+    response = f"{status_code} {urllib.parse.quote(message)}\n"
+    conn.sendall(response.encode('utf-8'))
+
 def main():
     # Parse command line arguments
     args = parse_arguments()
@@ -181,38 +219,28 @@ def main():
 
             conn, addr = server.accept()
             try:
-                data = conn.recv(1024).decode('utf-8').strip()
+                while True:
+                    data = conn.recv(1024)
+                    if not data:  # Connection closed by client
+                        break
 
-                matched = False
-                # Match 'get email@domain'
-                if data != 'get *':
-                    email_match = re.match(r'^get\s+([\w.+-]+@[\w.-]+)$', data, re.IGNORECASE)
-                    if email_match:
-                        email = email_match.group(1).lower()
-                        parts = email.split('@')
-                        if len(parts) == 2:
-                            domain = parts[1]
-                            mx_records = get_mx_records(domain, args.cache_ttl)
-
-                            for mx in mx_records:
-                                for pattern, relay in patterns.items():
-                                    if pattern in mx:
-                                        matched = relay
-                                        break
-                                if matched:
-                                    break
-
-                if matched:
-                    response = f"200 {urllib.parse.quote(matched)}\n"
-                    conn.sendall(response.encode('utf-8'))
-                    sys.stdout.write(f"Matched: {domain} → {matched}\n")
-                    sys.stdout.flush()
-                else:
-                    conn.sendall(b"500 NO%20RESULT\n")
+                    request = data.decode('utf-8').strip()
+                    try:
+                        process_request(request, conn, patterns, args.cache_ttl)
+                    except Exception as e:
+                        sys.stderr.write(f"Error processing request: {e}\n")
+                        sys.stderr.flush()
+                        send_response(conn, 400, str(e))
+                        break
 
             except Exception as e:
                 sys.stderr.write(f"Error handling connection: {e}\n")
                 sys.stderr.flush()
+                try:
+                    send_response(conn, 400, str(e))
+                except:
+                    pass
+
             finally:
                 conn.close()
 
@@ -220,6 +248,7 @@ def main():
         sys.stderr.write(f"Failed to start server: {e}\n")
         sys.stderr.flush()
         sys.exit(1)
+
     finally:
         server.close()
 
