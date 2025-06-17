@@ -14,6 +14,7 @@ Options:
     -p, --port PORT      Port to listen on (default: 10099)
     -H, --host HOST      Host to bind to (default: 127.0.0.1)
     -t, --cache-ttl SEC  Cache TTL in seconds (default: 3600, where 0 disables cache)
+    -v, --verbose        Increase verbosity level of logging
 
 Configuration File Format:
     Each line should contain a pattern and a relay, separated by whitespace:
@@ -45,6 +46,7 @@ import time
 import dns.resolver
 import urllib.parse
 import argparse
+import psutil
 
 # Change to the script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -58,6 +60,9 @@ DEFAULT_GC_INTERVAL = 3600
 
 # In-memory cache for MX records
 mx_cache = {}
+
+# Global args variable
+args = None
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -76,6 +81,10 @@ def parse_arguments():
                         type=int,
                         default=DEFAULT_CACHE_TTL,
                         help=f'Cache TTL in seconds (default: {DEFAULT_CACHE_TTL}, where 0 disables cache)')
+    parser.add_argument('-v', '--verbose',
+                        action='store_true',
+                        default=False,
+                        help=f'Increase verbosity level (default: false)')
     return parser.parse_args()
 
 def load_patterns(file_path):
@@ -97,14 +106,20 @@ def load_patterns(file_path):
     return patterns
 
 def get_mx_records(domain, cache_ttl):
-    """Get MX records for a domain using dns.resolver with optional caching."""
+    """Get MX records for a domain using dns.resolver with optional caching.
+
+    Returns:
+        tuple: (mx_records, from_cache) where:
+            - mx_records is a list of MX hostnames
+            - from_cache is a boolean indicating if the result came from cache
+    """
     current_time = time.time()
 
     # Check if caching is enabled (positive TTL) and we have a valid cached entry
     if cache_ttl > 0 and domain in mx_cache:
         cache_time, mx_records = mx_cache[domain]
         if current_time - cache_time < cache_ttl:
-            return mx_records
+            return mx_records, True
 
     # No valid cache entry or caching disabled, perform DNS lookup
     try:
@@ -115,13 +130,13 @@ def get_mx_records(domain, cache_ttl):
         if cache_ttl > 0:
             mx_cache[domain] = (current_time, mx_records)
 
-        return mx_records
+        return mx_records, False
     except (dns.resolver.NXDOMAIN, dns.resolver.NoAnswer, dns.resolver.NoNameservers):
         # Cache empty result if caching is enabled
         if cache_ttl > 0:
             mx_cache[domain] = (current_time, [])
 
-        return []
+        return [], False
 
 def cleanup_cache(cache_ttl):
     """Remove expired entries from the cache."""
@@ -141,14 +156,20 @@ def cleanup_cache(cache_ttl):
         del mx_cache[domain]
 
     if expired_keys:
-        sys.stdout.write(f"Garbage collection: removed {len(expired_keys)} expired cache entries, new total {len(mx_cache)}\n")
-        sys.stdout.flush()
+        log(f"Garbage collection: removed {len(expired_keys)} expired cache entries, new total {len(mx_cache)}\n")
 
     return len(expired_keys)
+
+def print_stats(active_connections):
+    process = psutil.Process(os.getpid())
+    memory_usage = process.memory_info().rss / 1024 / 1024  # Convert to MB
+    cache_size = len(mx_cache)
+    log(f"Memory usage: {memory_usage:.2f} MB, Cache items: {cache_size}, Active connections: {active_connections}\n")
 
 def process_request(request, conn, patterns, cache_ttl):
     """Process a single request and send the appropriate response."""
     matched = False
+    from_cache = False
     domain = None
 
     # Match 'get email@domain'
@@ -159,7 +180,7 @@ def process_request(request, conn, patterns, cache_ttl):
             parts = email.split('@')
             if len(parts) == 2:
                 domain = parts[1]
-                mx_records = get_mx_records(domain, cache_ttl)
+                mx_records, from_cache = get_mx_records(domain, cache_ttl)
 
                 for mx in mx_records:
                     for pattern, relay in patterns.items():
@@ -171,12 +192,12 @@ def process_request(request, conn, patterns, cache_ttl):
 
     if matched:
         send_response(conn, 200, matched)
-        sys.stdout.write(f"Matched: {domain} → {matched}\n")
+        cache_status = "cache hit" if from_cache else "dns lookup"
+        log(f"Match found ({cache_status}): {domain} → {matched}\n")
     else:
         send_response(conn, 500, 'NO RESULT')
-        sys.stdout.write(f"No match: {request}\n")
+        log(f"No match: {request}\n", False, True)
 
-    sys.stdout.flush()
     return domain, matched
 
 def send_response(conn, status_code, message):
@@ -184,14 +205,31 @@ def send_response(conn, status_code, message):
     response = f"{status_code} {urllib.parse.quote(message)}\n"
     conn.sendall(response.encode('utf-8'))
 
+def log(message, to_stderr=False, needs_verbose=False):
+    """Logs and flushes to stdout/stderr."""
+    if (to_stderr):
+        sys.stderr.write(message)
+    elif (needs_verbose and args.verbose) or not needs_verbose:
+        sys.stdout.write(message)
+    sys.stdout.flush()
+
+def log_dict(dict, needs_verbose=False):
+    for key, value in dict.items():
+        log(f"  {key} → {value}\n", False, needs_verbose)
+
+
 def main():
     # Parse command line arguments
+    global args
     args = parse_arguments()
+
+    # Keep track of active connections
+    active_connections = 0
 
     # Load patterns from the specified configuration file
     patterns = load_patterns(args.config)
     if not patterns:
-        sys.stderr.write(f"Warning: No patterns loaded from {args.config}\n")
+        log(f"Warning: No patterns loaded from {args.config}\n", True)
         sys.exit(1)
 
     # Create socket server
@@ -202,10 +240,13 @@ def main():
         server.bind((args.host, args.port))
         server.listen(5)
         if args.cache_ttl > 0:
-            sys.stdout.write(f"Socketmap server listening on {args.host}:{args.port} (cache {args.cache_ttl} seconds)\n")
+            log(f"Socketmap server listening on {args.host}:{args.port} (cache {args.cache_ttl} seconds)\n")
         else:
-            sys.stdout.write(f"Socketmap server listening on {args.host}:{args.port} (no cache)\n")
-        sys.stdout.flush()
+            log(f"Socketmap server listening on {args.host}:{args.port} (no cache)\n")
+
+        # Print patterns dictionary in a readable format
+        log(f"Loaded {(len(patterns))} patterns:\n", False, True)
+        log_dict(patterns, True)
 
         # Initialize last garbage collection time
         last_gc_time = time.time()
@@ -218,24 +259,28 @@ def main():
                 last_gc_time = current_time
 
             conn, addr = server.accept()
+            active_connections += 1
+
+            # Set a timeout for client connections (5 seconds)
+            conn.settimeout(5.0)
+
             try:
                 while True:
                     data = conn.recv(1024)
                     if not data:  # Connection closed by client
-                        break
+                       log(f"Connection closed by client: {addr}\n")
+                       break
 
                     request = data.decode('utf-8').strip()
                     try:
                         process_request(request, conn, patterns, args.cache_ttl)
                     except Exception as e:
-                        sys.stderr.write(f"Error processing request: {e}\n")
-                        sys.stderr.flush()
+                        log(f"Error processing request: {e}\n", True)
                         send_response(conn, 400, str(e))
                         break
 
             except Exception as e:
-                sys.stderr.write(f"Error handling connection: {e}\n")
-                sys.stderr.flush()
+                log(f"Error handling connection: {e}\n", True)
                 try:
                     send_response(conn, 400, str(e))
                 except:
@@ -243,10 +288,11 @@ def main():
 
             finally:
                 conn.close()
+                active_connections -= 1
+                print_stats(active_connections)
 
     except Exception as e:
-        sys.stderr.write(f"Failed to start server: {e}\n")
-        sys.stderr.flush()
+        log(f"Failed to start server: {e}\n", True)
         sys.exit(1)
 
     finally:

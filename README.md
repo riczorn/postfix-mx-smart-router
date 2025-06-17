@@ -24,6 +24,8 @@ The service uses substring matching for MX patterns, not exact matching. This me
 - The first pattern that matches any part of an MX record will be used
 - Patterns are checked in the order they appear in the configuration file
 
+**Please be aware that patterns are not matched against recipient domain but the MX records of that domain!**
+
 ## Installation
 
 ### Requirements
@@ -95,6 +97,7 @@ Group=postfix-mx-pattern-router
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=postfix-mx-pattern-router
+SyslogFacility=mail
 
 [Install]
 WantedBy=multi-user.target
