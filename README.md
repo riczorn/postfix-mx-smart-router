@@ -28,27 +28,24 @@ The service uses substring matching for MX patterns, not exact matching. This me
 
 ### Requirements
 
-1. Python 3.6 or higher
-2. Required Python packages:
-
-```bash
-pip install -r requirements.txt
-```
+- Python 3.6 or higher
 
 ### Setup
 
 1. Clone this repository:
 
 ```bash
-git clone https://github.com/filidorwiese/postfix-mx-pattern-router.git /usr/local/bin/postfix-mx-pattern-router
-cd /usr/local/bin/postfix-mx-pattern-router
+$ git clone https://github.com/filidorwiese/postfix-mx-pattern-router.git /usr/local/bin/postfix-mx-pattern-router
+$ cd /usr/local/bin/postfix-mx-pattern-router
 ```
 
 2. Install dependencies:
 
 ```bash
-pip install -r requirements.txt
+$ pip install -r requirements.txt
 ```
+
+Or use package manager from your distribution.
 
 3. Create the configuration file to define your MX patterns:
 
