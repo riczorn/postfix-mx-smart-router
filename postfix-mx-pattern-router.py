@@ -48,6 +48,7 @@ import dns.resolver
 import urllib.parse
 import argparse
 import psutil
+import threading
 
 # Change to the script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -57,14 +58,18 @@ DEFAULT_PORT = 10099
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PATTERN_FILE = '/etc/postfix/postfix-mx-pattern-router.conf'
 DEFAULT_CACHE_TTL = 3600
-DEFAULT_GC_INTERVAL = 3600
-DEFAULT_CLIENT_TIMEOUT = 30
+DEFAULT_CLIENT_TIMEOUT = 60
+GC_INTERVAL = 3600
+STATS_INTERVAL = 300
 
 # In-memory cache for MX records
 mx_cache = {}
 
 # Global args variable
 args = None
+
+# Global counter for active connections
+active_connections = 0
 
 def parse_arguments():
     """Parse command line arguments."""
@@ -162,15 +167,34 @@ def cleanup_cache(cache_ttl):
         del mx_cache[domain]
 
     if expired_keys:
-        log(f"Garbage collection: removed {len(expired_keys)} expired cache entries, new total {len(mx_cache)}\n")
+        log(f"Garbage collection: removed {len(expired_keys)} expired cache entries, new total {len(mx_cache)}\n", False, True)
 
     return len(expired_keys)
 
-def print_stats(active_connections):
+def print_stats():
     process = psutil.Process(os.getpid())
     memory_usage = process.memory_info().rss / 1024 / 1024  # Convert to MB
     cache_size = len(mx_cache)
-    log(f"Memory usage: {memory_usage:.2f} MB, Cache items: {cache_size}, Active connections: {active_connections}\n")
+    log(f"Memory usage: {memory_usage:.2f} MB, Cache items: {cache_size}, Active connections: {active_connections}\n", False, True)
+
+def bg_thread():
+    """Background thread function to periodically report stats and run garbage collection."""
+    last_gc_time = time.time()
+
+    while True:
+        current_time = time.time()
+
+        # Report stats
+        print_stats()
+
+        # Run garbage collection if cache is enabled and it's time
+        if args.cache_ttl > 0 and current_time - last_gc_time >= GC_INTERVAL:
+            cleanup_cache(args.cache_ttl)
+            last_gc_time = current_time
+
+        # Sleep until next interval
+        time.sleep(STATS_INTERVAL)
+
 
 def process_request(request, conn, patterns, cache_ttl):
     if request == 'get *':
@@ -225,7 +249,6 @@ def log_dict(dict, needs_verbose=False):
     for key, value in dict.items():
         log(f"  {key} → {value}\n", False, needs_verbose)
 
-
 def main():
     # Parse command line arguments
     global args
@@ -256,16 +279,11 @@ def main():
         log(f"Loaded {(len(patterns))} patterns:\n", False, True)
         log_dict(patterns, True)
 
-        # Initialize last garbage collection time
-        last_gc_time = time.time()
+        # Start the background thread for stats reporting and garbage collection
+        background_thread = threading.Thread(target=bg_thread, daemon=True)
+        background_thread.start()
 
         while True:
-            # Check if it's time to run garbage collection
-            current_time = time.time()
-            if args.cache_ttl > 0 and current_time - last_gc_time >= DEFAULT_GC_INTERVAL:
-                cleanup_cache(args.cache_ttl)
-                last_gc_time = current_time
-
             conn, addr = server.accept()
             active_connections += 1
 
@@ -298,7 +316,6 @@ def main():
             finally:
                 conn.close()
                 active_connections -= 1
-                print_stats(active_connections)
 
     except Exception as e:
         log(f"Failed to start server: {e}\n", True)
