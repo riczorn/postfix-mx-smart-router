@@ -16,6 +16,7 @@ Options:
     --cache-ttl SEC      Cache TTL in seconds (default: 3600, where 0 disables cache)
     --timeout SEC        Client inactivity timeout in seconds (default: 30, where 0 disables timeout)
     -v, --verbose        Increase verbosity level of logging
+    -q, --quiet          Disables logging except for errors
 
 Configuration File Format:
     Each line should contain a pattern and a relay, separated by whitespace:
@@ -96,6 +97,10 @@ def parse_arguments():
                         action='store_true',
                         default=False,
                         help=f'Increase verbosity level (default: false)')
+    parser.add_argument('-q', '--quiet',
+                        action='store_true',
+                        default=False,
+                        help=f'Quiet mode, disables logging (default: false)')
     return parser.parse_args()
 
 def load_patterns(file_path):
@@ -241,7 +246,7 @@ def log(message, to_stderr=False, needs_verbose=False):
     """Logs and flushes to stdout/stderr."""
     if (to_stderr):
         sys.stderr.write(message)
-    elif (needs_verbose and args.verbose) or not needs_verbose:
+    elif (needs_verbose and args.verbose) or not needs_verbose and not args.quiet:
         sys.stdout.write(message)
     sys.stdout.flush()
 
