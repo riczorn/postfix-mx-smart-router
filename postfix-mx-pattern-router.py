@@ -13,7 +13,8 @@ Options:
     -c, --config FILE    Path to configuration file (default: /etc/postfix/postfix-mx-pattern-router.conf)
     -p, --port PORT      Port to listen on (default: 10099)
     -H, --host HOST      Host to bind to (default: 127.0.0.1)
-    -t, --cache-ttl SEC  Cache TTL in seconds (default: 3600, where 0 disables cache)
+    --cache-ttl SEC      Cache TTL in seconds (default: 3600, where 0 disables cache)
+    --timeout SEC        Client inactivity timeout in seconds (default: 30, where 0 disables timeout)
     -v, --verbose        Increase verbosity level of logging
 
 Configuration File Format:
@@ -57,6 +58,7 @@ DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PATTERN_FILE = '/etc/postfix/postfix-mx-pattern-router.conf'
 DEFAULT_CACHE_TTL = 3600
 DEFAULT_GC_INTERVAL = 3600
+DEFAULT_CLIENT_TIMEOUT = 30
 
 # In-memory cache for MX records
 mx_cache = {}
@@ -77,10 +79,14 @@ def parse_arguments():
     parser.add_argument('-H', '--host',
                         default=DEFAULT_HOST,
                         help=f'Host to bind to (default: {DEFAULT_HOST})')
-    parser.add_argument('-t', '--cache-ttl',
+    parser.add_argument('--cache-ttl',
                         type=int,
                         default=DEFAULT_CACHE_TTL,
                         help=f'Cache TTL in seconds (default: {DEFAULT_CACHE_TTL}, where 0 disables cache)')
+    parser.add_argument('--timeout',
+                        type=int,
+                        default=DEFAULT_CLIENT_TIMEOUT,
+                        help=f'Client inactivity timeout in seconds (default: {DEFAULT_CLIENT_TIMEOUT}, where 0 disables timeout)')
     parser.add_argument('-v', '--verbose',
                         action='store_true',
                         default=False,
@@ -261,8 +267,9 @@ def main():
             conn, addr = server.accept()
             active_connections += 1
 
-            # Set a timeout for client connections (5 seconds)
-            conn.settimeout(5.0)
+            # Set a timeout for client connections if enabled
+            if args.timeout > 0:
+                conn.settimeout(args.timeout)
 
             try:
                 while True:
