@@ -183,7 +183,7 @@ def process_request(request, conn, patterns, cache_ttl):
     domain = None
 
     # Match 'get email@domain'
-    email_match = re.match(r'^get\s+([\w.+-]+@[\w.-]+)$', request, re.IGNORECASE)
+    email_match = re.match(r'^get\s+([^@]+@([^@]+))$', request, re.IGNORECASE)
     if email_match:
         email = email_match.group(1).lower()
         parts = email.split('@')
@@ -206,7 +206,7 @@ def process_request(request, conn, patterns, cache_ttl):
         log(f"Match found ({cache_status}): {domain} → {matched}\n")
     else:
         send_response(conn, 500, 'NO RESULT')
-        log(f"No match ({cache_status}): {request}\n", False, True)
+        log(f"No match ({cache_status}): {domain}\n", False, True)
 
 def send_response(conn, status_code, message):
     """Send a formatted response to the client with proper encoding."""
