@@ -59,7 +59,7 @@ DEFAULT_PORT = 10099
 DEFAULT_HOST = '127.0.0.1'
 DEFAULT_PATTERN_FILE = '/etc/postfix/postfix-mx-pattern-router.conf'
 DEFAULT_CACHE_TTL = 3600
-DEFAULT_CLIENT_TIMEOUT = 60
+DEFAULT_CLIENT_TIMEOUT = 600
 GC_INTERVAL = 3600
 STATS_INTERVAL = 300
 
@@ -182,7 +182,7 @@ def print_stats():
     cache_size = len(mx_cache)
     log(f"Memory usage: {memory_usage:.2f} MB, Cache items: {cache_size}, Active connections: {active_connections}\n", False, True)
 
-def bg_thread():
+def jobs_thread():
     """Background thread function to periodically report stats and run garbage collection."""
     last_gc_time = time.time()
 
@@ -199,7 +199,6 @@ def bg_thread():
 
         # Sleep until next interval
         time.sleep(STATS_INTERVAL)
-
 
 def process_request(request, conn, patterns, cache_ttl):
     if request == 'get *':
@@ -254,9 +253,47 @@ def log_dict(dict, needs_verbose=False):
     for key, value in dict.items():
         log(f"  {key} → {value}\n", False, needs_verbose)
 
+def handle_client(conn, addr, patterns, cache_ttl):
+    """Handle a client connection in a separate thread."""
+    global active_connections
+    active_connections += 1
+
+    try:
+        # Set a timeout for client connections if enabled
+        if args.timeout > 0:
+            conn.settimeout(args.timeout)
+
+        while True:
+            data = conn.recv(1024)
+            if not data:  # Connection closed by client
+                log(f"Connection closed by client: {addr}\n")
+                break
+
+            request = data.decode('utf-8').strip()
+            try:
+                process_request(request, conn, patterns, args.cache_ttl)
+            except Exception as e:
+                log(f"Error processing request: {e}\n", True)
+                send_response(conn, 400, str(e))
+                break
+
+    except Exception as e:
+        if isinstance(e, socket.timeout):
+            log(f"Connection timed out: {addr}\n", False, True)
+        else:
+            log(f"Error handling connection: {e}\n", True)
+            try:
+                send_response(conn, 400, str(e))
+            except:
+                pass
+
+    finally:
+        conn.close()
+        active_connections -= 1
+
 def main():
     # Parse command line arguments
-    global args, active_connections
+    global args
     args = parse_arguments()
 
     # Load patterns from the specified configuration file
@@ -281,46 +318,18 @@ def main():
         log(f"Loaded {(len(patterns))} patterns:\n", False, True)
         log_dict(patterns, True)
 
-        # Start the background thread for stats reporting and garbage collection
-        background_thread = threading.Thread(target=bg_thread, daemon=True)
+        # Start a background thread for stats reporting and garbage collection
+        background_thread = threading.Thread(target=jobs_thread, daemon=True)
         background_thread.start()
 
         while True:
             conn, addr = server.accept()
-            active_connections += 1
-
-            # Set a timeout for client connections if enabled
-            if args.timeout > 0:
-                conn.settimeout(args.timeout)
-
-            try:
-                while True:
-                    data = conn.recv(1024)
-                    if not data:  # Connection closed by client
-                       log(f"Connection closed by client: {addr}\n")
-                       break
-
-                    request = data.decode('utf-8').strip()
-                    try:
-                        process_request(request, conn, patterns, args.cache_ttl)
-                    except Exception as e:
-                        log(f"Error processing request: {e}\n", True)
-                        send_response(conn, 400, str(e))
-                        break
-
-            except Exception as e:
-                if isinstance(e, socket.timeout):
-                    log(f"Connection timed out: {addr}\n", False, True)
-                else:
-                    log(f"Error handling connection: {e}\n", True)
-                    try:
-                        send_response(conn, 400, str(e))
-                    except:
-                        pass
-
-            finally:
-                conn.close()
-                active_connections -= 1
+            client_thread = threading.Thread(
+                target=handle_client,
+                args=(conn, addr, patterns, args.cache_ttl),
+                daemon=True
+            )
+            client_thread.start()
 
     except Exception as e:
         log(f"Failed to start server: {e}\n", True)

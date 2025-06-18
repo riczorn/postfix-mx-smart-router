@@ -90,7 +90,7 @@ Description=Postfix MX Pattern Router Service
 After=network.target
 
 [Service]
-ExecStart=/usr/local/bin/postfix-mx-pattern-router/postfix-mx-pattern-router.py -c /etc/postfix/postfix-mx-pattern-router.conf -p 10099
+ExecStart=/usr/local/bin/postfix-mx-pattern-router/postfix-mx-pattern-router.py -c /etc/postfix/postfix-mx-pattern-router.conf -p 10099 --cache-ttl 3600
 Restart=on-failure
 User=postfix-mx-pattern-router
 Group=postfix-mx-pattern-router
@@ -121,7 +121,7 @@ $ systemctl status postfix-mx-pattern-router
 Add the following to your Postfix configuration (`/etc/postfix/main.cf`):
 
 ```
-transport_maps = tcp:127.0.0.1:10099
+transport_maps = tcp:[127.0.0.1]:10099
 ```
 
 Then reload Postfix.
