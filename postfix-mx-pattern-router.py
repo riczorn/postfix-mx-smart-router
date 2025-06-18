@@ -251,11 +251,8 @@ def log_dict(dict, needs_verbose=False):
 
 def main():
     # Parse command line arguments
-    global args
+    global args, active_connections
     args = parse_arguments()
-
-    # Keep track of active connections
-    active_connections = 0
 
     # Load patterns from the specified configuration file
     patterns = load_patterns(args.config)
@@ -307,11 +304,14 @@ def main():
                         break
 
             except Exception as e:
-                log(f"Error handling connection: {e}\n", True)
-                try:
-                    send_response(conn, 400, str(e))
-                except:
-                    pass
+                if isinstance(e, socket.timeout):
+                    log(f"Connection timed out: {addr}\n", False, True)
+                else:
+                    log(f"Error handling connection: {e}\n", True)
+                    try:
+                        send_response(conn, 400, str(e))
+                    except:
+                        pass
 
             finally:
                 conn.close()
