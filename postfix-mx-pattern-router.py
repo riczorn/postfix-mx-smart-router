@@ -173,38 +173,40 @@ def print_stats(active_connections):
     log(f"Memory usage: {memory_usage:.2f} MB, Cache items: {cache_size}, Active connections: {active_connections}\n")
 
 def process_request(request, conn, patterns, cache_ttl):
+    if request == 'get *':
+        send_response(conn, 500, 'NO RESULT')
+        return
+
     """Process a single request and send the appropriate response."""
     matched = False
     from_cache = False
     domain = None
 
     # Match 'get email@domain'
-    if request != 'get *':
-        email_match = re.match(r'^get\s+([\w.+-]+@[\w.-]+)$', request, re.IGNORECASE)
-        if email_match:
-            email = email_match.group(1).lower()
-            parts = email.split('@')
-            if len(parts) == 2:
-                domain = parts[1]
-                mx_records, from_cache = get_mx_records(domain, cache_ttl)
+    email_match = re.match(r'^get\s+([\w.+-]+@[\w.-]+)$', request, re.IGNORECASE)
+    if email_match:
+        email = email_match.group(1).lower()
+        parts = email.split('@')
+        if len(parts) == 2:
+            domain = parts[1]
+            mx_records, from_cache = get_mx_records(domain, cache_ttl)
 
-                for mx in mx_records:
-                    for pattern, relay in patterns.items():
-                        if pattern in mx:
-                            matched = relay
-                            break
-                    if matched:
+            for mx in mx_records:
+                for pattern, relay in patterns.items():
+                    if pattern in mx:
+                        matched = relay
                         break
+                if matched:
+                    break
+
+    cache_status = "cache hit" if from_cache else "dns lookup"
 
     if matched:
         send_response(conn, 200, matched)
-        cache_status = "cache hit" if from_cache else "dns lookup"
         log(f"Match found ({cache_status}): {domain} → {matched}\n")
     else:
         send_response(conn, 500, 'NO RESULT')
-        log(f"No match: {request}\n", False, True)
-
-    return domain, matched
+        log(f"No match ({cache_status}): {request}\n", False, True)
 
 def send_response(conn, status_code, message):
     """Send a formatted response to the client with proper encoding."""
