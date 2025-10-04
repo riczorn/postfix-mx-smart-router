@@ -15,6 +15,7 @@ This fork makes substantial changes to the original project by Filidor Wiese:
     - server perc is the percentage out of 100 that this server should be chosen when a 
       mail targets that group and an mx address is returned
     - default allows you to specify a default group; otherwise all servers are used
+    - copy `postfix-mx-smart-router.yaml.example` to `postfix-mx-smart-router.yaml`, edit your server groups and pattern rules, et voilà
 
 - on CTRL-C exit gracefully and show some stats such as : 
 ```
@@ -36,6 +37,7 @@ Please find the original README at the time of the fork, most of it is still val
 but the weighted round robin logic sits on top of everything and rules reference server groups directly.
 The only notable difference is the different name: `postfix-mx-smart-router.py`
 
+## Installation
 To set it up quickly, after checking out the code, 
 - create a virtual environment in `.venv` and activate it
 - import requirements
