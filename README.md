@@ -1,3 +1,61 @@
+# Postfix MX Smart Router Service
+
+A fork of [postfix-mx-pattern-router](https://github.com/filidorwiese/postfix-mx-pattern-router) which implements **Weighted Round Robin**
+but is incompatible with the original configuration.
+
+
+This fork makes substantial changes to the original project by Filidor Wiese:
+
+- support for Weighted Round Robin mx server groups
+- each rule can target a specific group
+- all servers are used if no group is chosen by a rule and no default rule is set
+- server groups have the same percentage usage as the main list. 
+  keep this into consideration when choosing the percentage for the individual servers
+- New configuration in yaml
+    - server perc is the percentage out of 100 that this server should be chosen when a 
+      mail targets that group and an mx address is returned
+    - default allows you to specify a default group; otherwise all servers are used
+
+- on CTRL-C exit gracefully and show some stats such as : 
+```
+    Group good
+    Name          # Sent |  curr. % / target %
+        mx1              5 |  41.6667 /  40.0000
+        mx2              5 |  41.6667 /  40.0000
+        mx3              2 |  16.6667 /  20.0000
+
+    Group bad
+    Name          # Sent |  curr. % / target %
+        mx4              1 | 100.0000 /  32.2581
+        mx5              0 |   0.0000 /   3.2258
+        mx6              0 |   0.0000 /  32.2581
+        mx7              0 |   0.0000 /  32.2581
+```
+
+Please find the original README at the time of the fork, most of it is still valid, 
+but the weighted round robin logic sits on top of everything and rules reference server groups directly.
+The only notable difference is the different name: `postfix-mx-smart-router.py`
+
+To set it up quickly, after checking out the code, 
+- create a virtual environment in `.venv` and activate it
+- import requirements
+- run the service for testing
+
+```bash
+    $ python -m venv .venv
+    $ . .venv/bin/activate
+    $ .venv/bin/pip install -r requirements.txt
+    $ .venv/bin/python ./postfix-mx-smart-router.py -v
+```
+
+- query the service with
+
+```bash
+    $ echo "get xyz@gmail.com" | nc 127.0.0.1 10099
+```
+
+
+
 # Postfix MX Pattern Router Service
 
 This service acts as a TCP lookup table for Postfix to dynamically route emails based on
@@ -151,3 +209,5 @@ $ journalctl -u postfix-mx-pattern-router -f
 
 ## License
 This project is licensed under the BSD 3-Clause License - see the LICENSE file for details.
+
+https://github.com/filidorwiese/postfix-mx-pattern-router
