@@ -12,7 +12,8 @@ Postfix MX Smart Router Service - fasterweb.net
 - New configuration in yaml
     - server perc is the percentage out of 100 that this server should be chosen when a 
       mail targets that group and an mx address is returned
-    - default allows you to specify a default group; otherwise all servers are used
+    - `default` allows you to specify a default group or NO RESULT;
+       otherwise all servers are used. Please note `default` must be the first rule.
 
 - on CTRL-C exit gracefully and show some stats such as : 
 
