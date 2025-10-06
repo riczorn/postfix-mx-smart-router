@@ -29,6 +29,12 @@ Group bad
     mx6              0 |   0.0000 /  32.2581
     mx7              0 |   0.0000 /  32.2581
 
+2025-10-03: published on github: https://github.com/riczorn/postfix-mx-smart-router
+2025-10-05: added support for 500: NO RESULT
+    - if a server identifier is used in a Rule, match it directly
+
+    TODO
+    - log DATE;from;to;result
     
 See comments in the config sample file for more params explanations.
 
@@ -166,34 +172,52 @@ class Servers:
             for server in self.servers:
                 server.perc_current = server.mails_sent / total_mails
 
-    def get_next(self, identifier = False):
+    def get_next(self, mx_identifier = False):
         """ 
-        iterates over servers, choosing the next one, whilst trying to have each server send the right percentage of emails
-        i.e. increment self.next by 1, until the server's current percentage is lower than its target.
+        iterates over servers, choosing the next one, whilst trying to have 
+        each server send the right percentage of emails
+        i.e. increment self.next by 1, until the server's current percentage 
+        is lower than its target.
         the percentages are calculated each time from the totals calculated in calc_perc()
 
-        identifier can be any of the good, bad arrays in the config, and defaults to 'servers' which 
-        means all.
+        identifier can be:
+         - any of the good, bad arrays in the config (in which case it is ignored, 
+           as this server group was already chosen)
+         - a specific mx name, in which case it is simply returned.
+        it defaults to all unless a `default` rule is present in the configuration.
         """
-        
-        current = (self.current + 1 ) % len(self.servers)
-        self.calc_perc()
-        
-        found = False
-        iteration = 0
-        while iteration < len(self.servers) and not found:
-            iteration += 1
-            if self.servers[current].perc_current < self.servers[current].perc_target:
-                self.current = current
-                found = True
-                break
+        chosen_server = False
 
-            current = (current + 1 ) % len(self.servers)
+        if mx_identifier:
+            # this will find a server if its name is mx_identifier
+            chosen_server = self.get(mx_identifier)
+
+        if not chosen_server:
+            # then mx_identifier is a group
+            current = (self.current + 1 ) % len(self.servers)
+            self.calc_perc()
             
-        self.servers[self.current].mails_sent += 1
-        return self.servers[current]
+            found = False
+            iteration = 0
+            while iteration < len(self.servers) and not found:
+                iteration += 1
+                if self.servers[current].perc_current < self.servers[current].perc_target:
+                    self.current = current
+                    found = True
+                    break
 
+                current = (current + 1 ) % len(self.servers)
+            chosen_server = self.servers[self.current]
 
+        chosen_server.mails_sent += 1
+        return chosen_server
+
+    def get(self, name):
+        for server in self.servers:
+            if name == server.name:
+                return server
+        # Server not found, most likely it's a group and will be handled by get_next
+        return False
    
 
 class Config:
@@ -284,22 +308,28 @@ class Config:
         if not result:
             result = default
 
-        return result
+        return result, default
 
-    def get_server_group(self, server_identifier):
+    def get_server_group(self, identifier):
+        """ 
+        identifier can be either a server group or a server name; 
+        in the latter case the full servers array will be returned, and get_next will spot the 
+        specified server instead of iterating to the next available one
+        """
         servers_obj = self.servers_obj
-        if (server_identifier):
+
+        if (identifier):
             server_groups = [sg for sg in vars(self.server_groups) if not sg.startswith('__')]
-            if server_identifier in server_groups:
-                servers_obj = getattr(self.server_groups, server_identifier)
-                
+            if identifier in server_groups:
+                servers_obj = getattr(self.server_groups, identifier)
+
         return servers_obj
 
     def test(self):
         """
         test run the weighted server round-robin
         """
-        for i in range(100000):
+        for i in range(125000):
             self.servers_obj.get_next()
         self.servers_obj.print()
 
@@ -467,7 +497,9 @@ def process_request(request, conn, config, cache_ttl):
         if not message:
             status_code = 500
             message = 'NO RESULT'
+            log( f"  Match failed: {status_code} {message} - {request}", False, False )
         send_response(conn, status_code, message)
+        
     else:
         # this should never happen unless there is no servers in the configuration
         send_response(conn, 500, 'NO RESULT')
@@ -507,7 +539,7 @@ def handle_client(conn, addr, config, cache_ttl):
         while True:
             data = conn.recv(1024)
             if not data:  # Connection closed by client
-                log(f"Connection closed by client: {addr}")
+                log(f"Connection closed by client: {addr}", False, True)
                 break
 
             request = data.decode('utf-8').strip()
@@ -540,7 +572,7 @@ def process_request_email(request, cache_ttl):
     mx_server_group = False
     from_cache = False
     domain = None
-
+    default = False
     # Match 'get email@domain'
         
     email_match = re.match(r'^get\s+([^@]+@([^@]+))$', request, re.IGNORECASE)
@@ -552,25 +584,26 @@ def process_request_email(request, cache_ttl):
             mx_records, from_cache = get_mx_records(domain, cache_ttl)
 
             for mx in mx_records:
-                mx_server_group = config.test_domain_rules(email, mx)
+                mx_server_group, default = config.test_domain_rules(email, mx)
                 if mx_server_group:
                     break
 
     cache_status = "cache hit" if from_cache else "dns lookup"
-    return mx_server_group
+    return mx_server_group, default
     
 
 def get_next_server(request, cache_ttl):
     global config
-    rules_mx = process_request_email(request, cache_ttl)
-    if not rules_mx:
-        return False
-    log( f"  Request get_next_server: {request}: rules_mx: {rules_mx}", False, True )
+    mx_identifier, default = process_request_email(request, cache_ttl)
+    if mx_identifier=='NO RESULT' and (default=='NO RESULT' or not default):
+        return False # which will be translated to 500: NO RESULT
+        # unless a default rule was specified
+    log( f"  Request get_next_server: {request}: rules_mx: {mx_identifier}", False, True )
     
-    servers_obj = config.get_server_group(rules_mx)
-
-    addr = servers_obj.get_next(rules_mx).address
-    return f"{addr}"
+    servers_obj = config.get_server_group(mx_identifier)
+    
+    return servers_obj.get_next(mx_identifier).address
+    
 
 
 def main():
@@ -581,7 +614,7 @@ def main():
 
     # Load patterns from the specified configuration file
     config.load(args.config)
-    # config.test() perform a few lookups to test the round robin
+    # config.test() # perform a few lookups to test the round robin
 
     found = False
 
