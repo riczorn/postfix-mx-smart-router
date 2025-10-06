@@ -97,6 +97,7 @@ import argparse
 import psutil
 import threading
 import yaml
+import logging
 
 # Change to the script's directory
 os.chdir(os.path.dirname(os.path.abspath(__file__)))
@@ -224,6 +225,21 @@ class Servers:
 class Config:
     config = {}
     servers = []
+    logger = False
+
+    def setup_custom_logger(self, name, filename):
+        formatter = logging.Formatter(fmt='%(asctime)s %(levelname)-8s %(message)s',
+                                    datefmt='%Y-%m-%d %H:%M:%S')
+        handler = logging.FileHandler('log.txt', mode='w')
+        handler.setFormatter(formatter)
+        screen_handler = logging.StreamHandler(stream=sys.stdout)
+        screen_handler.setFormatter(formatter)
+        logger = logging.getLogger(name)
+        logger.setLevel(logging.DEBUG)
+        logger.addHandler(handler)
+        logger.addHandler(screen_handler)
+        return logger
+    
 
     def obj_dic(self, d):
         """
@@ -260,6 +276,7 @@ class Config:
             self.config_dict = yaml.safe_load(config_file)
             self.config = self.obj_dic(self.config_dict)
             log("# MX Servers", False, True)
+            self.logger = self.setup_custom_logger('postfix-mx-smart-router', self.config.config.log_file)
             self.servers_obj = Servers(self.config.servers.names)
             self.servers = self.servers_obj.servers
             
@@ -295,15 +312,15 @@ class Config:
                 default = value
             if email == rule:
                 result = value
-                log( f"  Matched email {email} against {rule}: {value}", False, False )
+                log( f"  Matched email {email} against {rule}: {value}", False, True )
                 break
             if rule in domain: # domain is the name of the mx record i.e mx.example.com
                 result = value
-                log( f"  Matched MX domain {domain} against {rule}: {value}", False, False )
+                log( f"  Matched MX domain {domain} against {rule}: {value}", False, True )
                 break
             if rule in email: # this will match the rule "example.com" against john@example.com
                 result = value
-                log( f"  Matched mail domain {domain} against {rule}: {value}", False, False )
+                log( f"  Matched mail domain {domain} against {rule}: {value}", False, True )
                 break
             
         if not result:
@@ -342,6 +359,10 @@ class Config:
             server_obj = config.get_server_group(server_name)
             log(f"\nGroup {server_name}", False, True)
             server_obj.print()
+
+    def print_log(self, email, target, mx):
+        self.logger.info( f"{email}\t{target}\t{mx}" )
+
 
 config = Config()
 
@@ -498,7 +519,8 @@ def process_request(request, conn, config, cache_ttl):
         if not message:
             status_code = 500
             message = 'NO RESULT'
-            log( f"  Match failed: {status_code} {message} - {request}", False, False )
+            log( f"  Match failed: {status_code} {message} - {request}", False, True )
+            
         send_response(conn, status_code, message)
         
     else:
@@ -597,15 +619,18 @@ def get_next_server(request, cache_ttl):
     global config
     mx_identifier, default = process_request_email(request, cache_ttl)
     if mx_identifier=='NO RESULT' and (default=='NO RESULT' or not default):
+        config.print_log(email=request, target=mx_identifier, mx='n/a')
         return False # which will be translated to 500: NO RESULT
         # unless a default rule was specified
-    log( f"  Request get_next_server: {request}: rules_mx: {mx_identifier}", False, True )
+    
     
     servers_obj = config.get_server_group(mx_identifier)
+    mx = servers_obj.get_next(mx_identifier).address
     
-    return servers_obj.get_next(mx_identifier).address
-    
+    config.print_log(email=request, target=mx_identifier, mx=mx)
 
+    return mx
+    
 
 def main():
     # Parse command line arguments
