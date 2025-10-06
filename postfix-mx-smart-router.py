@@ -14,6 +14,8 @@ Postfix MX Smart Router Service - fasterweb.net
       mail targets that group and an mx address is returned
     - `default` allows you to specify a default group or NO RESULT;
        otherwise all servers are used. Please note `default` must be the first rule.
+    - `default` = NO RESULT     returns status = 500
+    - config.log_file must be writable
 
 - on CTRL-C exit gracefully and show some stats such as : 
 
@@ -195,7 +197,7 @@ class Servers:
             chosen_server = self.get(mx_identifier)
 
         if not chosen_server:
-            # then mx_identifier is a group
+            # hence mx_identifier is a group
             current = (self.current + 1 ) % len(self.servers)
             self.calc_perc()
             
@@ -228,15 +230,22 @@ class Config:
     logger = False
 
     def setup_custom_logger(self, name, filename):
+        logger = logging.getLogger(name)
         formatter = logging.Formatter(fmt='%(asctime)s %(levelname)-8s %(message)s',
                                     datefmt='%Y-%m-%d %H:%M:%S')
-        handler = logging.FileHandler('log.txt', mode='w')
-        handler.setFormatter(formatter)
+        logger.setLevel(logging.DEBUG)
+        
+        if filename:
+            try:
+                handler = logging.FileHandler(filename, mode='w')
+                handler.setFormatter(formatter)
+                logger.addHandler(handler)
+            except:
+                log(f"ERROR: Failed to setup file logger to {filename}", False, False);
+                sys.exit(1) # Exit with error
+        
         screen_handler = logging.StreamHandler(stream=sys.stdout)
         screen_handler.setFormatter(formatter)
-        logger = logging.getLogger(name)
-        logger.setLevel(logging.DEBUG)
-        logger.addHandler(handler)
         logger.addHandler(screen_handler)
         return logger
     
@@ -276,7 +285,11 @@ class Config:
             self.config_dict = yaml.safe_load(config_file)
             self.config = self.obj_dic(self.config_dict)
             log("# MX Servers", False, True)
-            self.logger = self.setup_custom_logger('postfix-mx-smart-router', self.config.config.log_file)
+            log_file = False
+            if hasattr(self.config, 'config') and hasattr(self.config.config, 'log_file'):
+                log_file = self.config.config.log_file
+                
+            self.logger = self.setup_custom_logger('postfix-mx-smart-router', log_file)
             self.servers_obj = Servers(self.config.servers.names)
             self.servers = self.servers_obj.servers
             
