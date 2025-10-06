@@ -453,7 +453,6 @@ def jobs_thread():
 
 
 
-
 def process_request(request, conn, config, cache_ttl):
     if request == 'get *':
         send_response(conn, 500, 'NO RESULT')
@@ -463,8 +462,14 @@ def process_request(request, conn, config, cache_ttl):
     """ Smart weighted Round robin for mx servers """
     if len(config.servers)  > 0:
         # return the next server in the appropriate server group
-        send_response(conn, 200, get_next_server(request, cache_ttl))
+        message = get_next_server(request, cache_ttl)
+        status_code = 200
+        if not message:
+            status_code = 500
+            message = 'NO RESULT'
+        send_response(conn, status_code, message)
     else:
+        # this should never happen unless there is no servers in the configuration
         send_response(conn, 500, 'NO RESULT')
         log(f"Config not loaded", False, True) 
 
@@ -558,6 +563,8 @@ def process_request_email(request, cache_ttl):
 def get_next_server(request, cache_ttl):
     global config
     rules_mx = process_request_email(request, cache_ttl)
+    if not rules_mx:
+        return False
     log( f"  Request get_next_server: {request}: rules_mx: {rules_mx}", False, True )
     
     servers_obj = config.get_server_group(rules_mx)

@@ -34,9 +34,9 @@ This fork makes substantial changes to the original project by Filidor Wiese:
 ```
 
 ## Installation
-To set it up quickly, after checking out the code, 
+To quickly set it up, after checking out the code, 
 - create a virtual environment in `.venv` and activate it
-- import requirements
+- installport requirements
 - copy `postfix-mx-smart-router.yaml.example` to `postfix-mx-smart-router.yaml`, edit your server groups and pattern rules
 - run the service for testing
 
@@ -53,9 +53,15 @@ To set it up quickly, after checking out the code,
     $ echo "get xyz@gmail.com" | nc 127.0.0.1 10099
 ```
 
+## Expected response
+The service responds with:
+- 200 followed by the URL-encoded relay server *from the selected group* if a match is found
+- 200 followed by the URL-encoded relay server *from the default group/all servers* if **no** match is found
+- 500 NO%20RESULT is never returned
+
 ## End of updated part
-Please find the original README below, as it appeared at the time of this fork; most of it is still valid, 
-The only notable difference is the different name: `postfix-mx-smart-router.py` and **different configuration** format and options
+Please find the original README below, as it appeared at the time of this fork October 3rd, 2025; most of it is still valid, 
+The only notable difference is the different name: `postfix-mx-smart-router.py` and **different configuration** filename, format and options
 
 
 # Postfix MX Pattern Router Service

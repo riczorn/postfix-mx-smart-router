@@ -28,7 +28,7 @@ servers:
   bad: [mx4, mx5, mx6, mx7]
 
 sender_rules:
-  # the order of the rules is important: start from the longer emails down to the shortest, 
+  # the order of the rules is important: start from the longer expressions down to the shortest, 
   # i.e. given the two rules:
   # - office@example.com : bad
   # - financial_office@example.com : good
@@ -50,4 +50,8 @@ sender_rules:
   example.com: good
   default:  good
 
+  # alternatively, if you omit *default* it will return a server from the full list of servers
+  # if you want to return `NO RESULT` if no rules match, simply add 
+  # `default: NO RESULT`
+  # and it will be returned with a 500 error code as Postfix expects.
 
